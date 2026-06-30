@@ -169,7 +169,7 @@ def run_stock_crawler():
                 if detail_res.status_code == 200:
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
 
-                    # 1. 확정공모가 추적 파트
+                    # 💡 [구조 분리 파트 1] 확정공모가 전용 완전 추적 (간섭 차단)
                     detail_tables = detail_soup.find_all("table")
                     for d_table in detail_tables:
                         if "확정공모가" in d_table.get_text():
@@ -186,7 +186,7 @@ def run_stock_crawler():
                                                     confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                    # 2. 🎯 tbody 단위 정밀 저격 파싱 로직 및 매칭내용 디버깅 강화
+                    # 💡 [구조 분리 파트 2] tbody 단위 유통가능물량 정밀 추적 (독립 가동)
                     detail_tbodies = detail_soup.find_all("tbody")
                     for t_idx, d_tbody in enumerate(detail_tbodies):
                         tbody_rows = d_tbody.find_all("tr")
@@ -198,7 +198,6 @@ def run_stock_crawler():
 
                             if "유통가능물량" in second_row_text:
                                 print(f"  👉 [{t_idx}번 tbody] 유통가능물량 진짜 표 저격 성공")
-                                # 💡 [추가 로그] 적중된 tbody의 원본 컨텐츠 상위 150자를 출력하여 오파싱 검증 기반 마련
                                 tbody_summary = re.sub(r'\s+', ' ', d_tbody.get_text()).strip()
                                 print(f"    - [tbody 매칭본문 스냅샷]: '{tbody_summary[:150]}...'")
 
