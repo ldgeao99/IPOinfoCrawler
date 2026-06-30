@@ -5,12 +5,12 @@ import os
 import urllib3
 import ssl
 import re
-import sys  # 💡 정수 변환 자릿수 제한 확장을 위해 추가
+import sys
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from openai import OpenAI
 
-# 💡 [안전장치 1] 파이썬 엔진의 정수형 문자열 변환 한계선을 1만 자리로 확장하여 런타임 크래시 방지
+# 파인 레벨 정수 변환 제한 확장
 sys.set_int_max_str_digits(10000)
 
 # 1. 환경 설정 및 클라이언트 초기화
@@ -164,7 +164,7 @@ def run_stock_crawler():
                 if detail_res.status_code == 200:
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
 
-                    # 상단 공모정보 테이블에서 '확정공모가' 추출
+                    # 1. 상단 공모정보 테이블에서 '확정공모가' 추출
                     detail_tables = detail_soup.find_all("table")
                     for d_table in detail_tables:
                         if "확정공모가" in d_table.get_text():
@@ -173,16 +173,16 @@ def run_stock_crawler():
                                 d_cells = d_row.find_all(["th", "td"])
                                 for i, cell in enumerate(d_cells):
                                     if "확정공모가" in cell.get_text():
-                                        raw_price = d_cells[i + 1].get_text().strip()
-
-                                        # 💡 [안전장치 2] 가격이 적힌 칸의 길이가 정상 범위(30자 이하)일 때만 숫자를 파싱하도록 노이즈 텍스트 필터링
-                                        if len(raw_price) < 30:
-                                            price_digits = re.sub(r'[^\d]', '', raw_price)
-                                            if price_digits:
-                                                confirmed_price = f"{int(price_digits):,}원"
+                                        # 💡 [안전장치] 현재 칸이 마지막 칸이 아닐 때만(인덱스 범위 내부일 때만) 가져오도록 예외 조치
+                                        if i + 1 < len(d_cells):
+                                            raw_price = d_cells[i + 1].get_text().strip()
+                                            if len(raw_price) < 30:
+                                                price_digits = re.sub(r'[^\d]', '', raw_price)
+                                                if price_digits:
+                                                    confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                    # 기존 AI 요약 메커니즘 엔진 작동
+                    # 2. OpenAI 핵심 비즈니스 요약 엔진 정상 가동
                     page_text = detail_soup.get_text()
                     if "1." in page_text or "사업현황" in page_text:
                         cleaned_page_text = clean_text(page_text)
@@ -194,10 +194,11 @@ def run_stock_crawler():
                             target_chunk = cleaned_page_text[max(0, start_idx - 20):start_idx + 3500]
                             detail_desc = summarize_business_with_ai(stock_name, target_chunk)
             except Exception as sub_e:
-                print(f"⚠️ {stock_name} AI 데이터 분석 위임 실패: {str(sub_e)}")
+                print(f"⚠️ {stock_name} 상세 데이터 가공 실패: {str(sub_e)}")
 
+            # 🎯 [요청 반영] AI 요약 설명이 먼저 나오고, 공모가 안내가 '하단'에 위치하도록 순서 교정
             if confirmed_price:
-                detail_desc = f"공모가: {confirmed_price}\n{detail_desc}"
+                detail_desc = f"{detail_desc}\n공모가: {confirmed_price}"
 
             payload = {
                 "date": formatted_date,
