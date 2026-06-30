@@ -177,13 +177,15 @@ def run_stock_crawler():
             except Exception as sub_e:
                 print(f"⚠️ {stock_name} AI 데이터 분석 위임 실패: {str(sub_e)}")
 
-            payload = {
-                "date": formatted_date,
-                "category": "신규상장",
-                "eventName": stock_name,
-                "detail": detail_desc,
-                "relatedStocks": ""
-            }
+                # 3. 주식 일정 캘린더 전용 스펙 페이로드 빌드
+                payload = {
+                    "date": formatted_date,
+                    "category": "신규상장",
+                    "eventName": stock_name,
+                    "detail": detail_desc,
+                    "relatedStocks": "",
+                    "url": detail_url  # 💡 [신규 추가] 클릭 시 이동할 38커뮤니케이션 상세 페이지 링크를 저장합니다.
+                }
 
             events_ref.add(payload)
             success_count += 1
