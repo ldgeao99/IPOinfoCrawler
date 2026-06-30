@@ -30,7 +30,7 @@ def clean_text(text):
 def summarize_business_with_ai(stock_name, business_raw_text):
     """
     [🤖 AI 요약 엔진] GPT에게 원문 텍스트를 전달하여
-    핵심 비즈니스 모델만 50~60자 내외로 자연스럽게 한 줄 요약해 옵니다.
+    핵심 비즈니스 모델만 10~20자 내외 명사형으로 정밀 요약해 옵니다.
     """
     if not business_raw_text or "사업현황" not in business_raw_text:
         return f"{stock_name} 상장 일정 자동 등록"
@@ -38,7 +38,7 @@ def summarize_business_with_ai(stock_name, business_raw_text):
     try:
         # 프롬프트 엔지니어링을 통해 노이즈를 걸러내고 핵심 결과값 규격 강제
         response = ai_client.chat.completions.create(
-            model="gpt-4o-mini",  # 가성비 극대화 모델 (회당 약 0.1원 미만)
+            model="gpt-4o-mini",  # 가성비 극대화 모델
             messages=[
                 {
                     "role": "system",
@@ -53,23 +53,20 @@ def summarize_business_with_ai(stock_name, business_raw_text):
                         "5. '입니다' 대신 명사형으로 끝낸다.\n"
                         "6. 10~20자 내외로 작성한다.\n"
                         "7. '인공지능'키워드는 'AI'로 대체해줘\n"
-                        "8. 설명 없이 결과 한 줄만 출력한다.\n"
-
+                        "8. 설명 없이 결과 한 줄만 출력한다."
                     )
                 },
                 {"role": "user", "content": f"기업명: {stock_name}\n\n[사업 현황 원문]\n{business_raw_text[:2500]}"}
-                # 안정적 컨텍스트 전송
             ],
             max_tokens=100,
-            temperature=0.4  # 일관성 있는 분석 출력을 위해 낮은 값 세팅
+            temperature=0.4
         )
         ai_result = response.choices[0].message.content.strip()
         return f"{ai_result}"
 
     except Exception as e:
         print(f"❌ GPT API 통신 실패: {str(e)}")
-        # API 오류 등 비상 상황 발생 시 글자 자르기 폴백 로직으로 우회 처리 (안전장치)
-        return f"[기업 개요] {stock_name} 공모주 신규상장 예정 종목."
+        return f"신규상장 예정 종목"
 
 
 def run_stock_crawler():
@@ -149,8 +146,7 @@ def run_stock_crawler():
             if "index.htm" in detail_route:
                 detail_route = detail_route.replace("index.htm", "").replace("?", "")
 
-            detail_url = base_url + detail_route if detail_route.startswith(
-                "/") else f"{base_url}/html/fund/{detail_route}"
+            detail_url = base_url + detail_route if detail_route.startswith("/") else f"{base_url}/html/fund/{detail_route}"
             if "o=v" not in detail_url and "no=" in detail_url:
                 detail_url = detail_url.replace("?", "?o=v&")
 
@@ -176,15 +172,15 @@ def run_stock_crawler():
             except Exception as sub_e:
                 print(f"⚠️ {stock_name} AI 데이터 분석 위임 실패: {str(sub_e)}")
 
-                # 3. 주식 일정 캘린더 전용 스펙 페이로드 빌드
-                payload = {
-                    "date": formatted_date,
-                    "category": "신규상장",
-                    "eventName": stock_name,
-                    "detail": detail_desc,
-                    "relatedStocks": "",  # 관련주 비워두기 적용 완료
-                    "url": detail_url  # 상세 페이지 링크 주소 적용 완료
-                }
+            # 🎯 [수정 교정] payload 딕셔너리 빌드 및 선언 위치를 try-except 밖으로 탈출시켰습니다.
+            payload = {
+                "date": formatted_date,
+                "category": "신규상장",
+                "eventName": stock_name,
+                "detail": detail_desc,
+                "relatedStocks": "",  # 관련주 비워두기 적용 완료
+                "url": detail_url  # 상세 페이지 링크 주소 적용 완료
+            }
 
             events_ref.add(payload)
             success_count += 1
