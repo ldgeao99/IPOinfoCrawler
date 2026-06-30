@@ -189,45 +189,47 @@ def run_stock_crawler():
                                                     confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                        # 2. 🎯 [최적화 반영] 유통가능물량 타겟 집중 탐색 엔진
-                        # 테이블 자체에 '유통가능물량' 단어가 있을 때만 단 한 번 진입합니다.
+                        # 2. 🎯 유통가능물량 파싱 핵심 종결 로직 (합계 행 강제 앵커 보정)
                         if "유통가능물량" in d_table_text:
                             print(f"  👉 [{idx}번 테이블] 유통가능물량 전용 표 적중 성공")
                             d_rows = d_table.find_all("tr")
 
-                            # 불필요한 위쪽 행들을 거르고, 주식수와 퍼센트 조합이 존재하는 행들만 역순 탐색하기 위해 뒤집어서 스캔
                             for d_row in reversed(d_rows):
                                 row_combined_text = re.sub(r'\s+', '', d_row.get_text())
 
-                                # 콤마가 포함된 주식수 패턴세트와 소수점 퍼센트 패턴세트 독립 추출
-                                shares_matches = re.findall(r'\b\d{1,3}(?:,\d{3})+\b|[\d,]{4,}', row_combined_text)
-                                percent_matches = re.findall(r'[\d.]+\%', row_combined_text)
+                                # 💡 [보정 가드] 다른 주주 행을 원천 배제하고, 오직 최종 합계 수치가 적힌 행만 타겟팅합니다.
+                                if "합계" in row_combined_text:
+                                    print(f"    - '합계' 결산 행 포착: '{row_combined_text}'")
 
-                                if shares_matches and percent_matches:
-                                    raw_shares = shares_matches[-1]
-                                    final_percent = percent_matches[-1]
+                                    # 천 단위 콤마가 포함된 주식수 패턴세트와 소수점 퍼센트 패턴세트 독립 추출
+                                    shares_matches = re.findall(r'\b\d{1,3}(?:,\d{3})+\b|[\d,]{4,}', row_combined_text)
+                                    percent_matches = re.findall(r'[\d.]+\%', row_combined_text)
 
-                                    # 밀착 현상으로 인한 경계선 예외 보정 구문 실행
-                                    if final_percent.startswith('.'):
-                                        actual_percent_prefix = re.search(r'(\d+)' + re.escape(final_percent),
-                                                                          row_combined_text)
-                                        if actual_percent_prefix:
-                                            final_percent = f"{actual_percent_prefix.group(1)}{final_percent}"
+                                    if shares_matches and percent_matches:
+                                        raw_shares = shares_matches[-1]
+                                        final_percent = percent_matches[-1]
 
-                                    final_shares = re.sub(r'\d+$', '', raw_shares) if raw_shares.endswith(
-                                        final_percent.split('.')[0]) else raw_shares
+                                        # 밀착 현상으로 인한 경계선 분할 가공
+                                        if final_percent.startswith('.'):
+                                            actual_percent_prefix = re.search(r'(\d+)' + re.escape(final_percent),
+                                                                              row_combined_text)
+                                            if actual_percent_prefix:
+                                                final_percent = f"{actual_percent_prefix.group(1)}{final_percent}"
 
-                                    match_clean = re.search(r'([\d,]+?)(?=\d{2}\.\d+%)|([\d,]+)', raw_shares)
-                                    if match_clean:
-                                        final_shares = match_clean.group(1) if match_clean.group(
-                                            1) else match_clean.group(2)
+                                        final_shares = re.sub(r'\d+$', '', raw_shares) if raw_shares.endswith(
+                                            final_percent.split('.')[0]) else raw_shares
 
-                                    # 100% 규격 필터 해제 및 최종 조립 완료
-                                    if final_percent != "100.00%":
-                                        floating_shares = f"{final_shares.strip(',')}주({final_percent})"
-                                        print(f"    - 🎯 고속 매핑 완료: {floating_shares}")
-                                        break  # 원하는 최종 하단 합계 수치를 찾았으므로 즉시 루프 탈출 (속도 극대화)
-                            break  # 전용 테이블 처리가 끝났으므로 다른 테이블 검사 스킵
+                                        match_clean = re.search(r'([\d,]+?)(?=\d{2}\.\d+%)|([\d,]+)', raw_shares)
+                                        if match_clean:
+                                            final_shares = match_clean.group(1) if match_clean.group(
+                                                1) else match_clean.group(2)
+
+                                        # 예외 필터 검증 후 최종 빌드 확정
+                                        if final_percent != "100.00%":
+                                            floating_shares = f"{final_shares.strip(',')}주({final_percent})"
+                                            print(f"    - 🎯 정밀 매핑 완료: {floating_shares}")
+                                            break
+                            break
 
                     # 3. OpenAI 요약 파트
                     page_text = detail_soup.get_text()
