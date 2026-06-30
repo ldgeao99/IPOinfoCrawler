@@ -168,15 +168,11 @@ def run_stock_crawler():
 
                 if detail_res.status_code == 200:
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
+
+                    # 1. 확정공모가 추적 파트 (기존 유지)
                     detail_tables = detail_soup.find_all("table")
-
-                    print(f"📊 상세페이지 내 발견된 전체 테이블 개수: {len(detail_tables)}개")
-
-                    for idx, d_table in enumerate(detail_tables):
-                        d_table_text = d_table.get_text()
-
-                        # 1. 확정공모가 추적 파트
-                        if "확정공모가" in d_table_text:
+                    for d_table in detail_tables:
+                        if "확정공모가" in d_table.get_text():
                             d_rows = d_table.find_all("tr")
                             for d_row in d_rows:
                                 d_cells = d_row.find_all(["th", "td"])
@@ -190,41 +186,51 @@ def run_stock_crawler():
                                                     confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                        # 2. 🎯 유통가능물량 파싱 핵심 종결 로직 (키워드 3종 삼각 교차 검증)
-                        # 💡 표 내부에 '유통가능물량', '주식수', '지분율' 세 단어가 모두 완벽히 존재할 때만 진입합니다.
-                        if "유통가능물량" in d_table_text and "주식수" in d_table_text and "지분율" in d_table_text:
-                            print(f"  👉 [{idx}번 테이블] 3종 키워드(유통가능물량+주식수+지분율) 검증 완료된 진짜 표 적중 성공")
-                            d_rows = d_table.find_all("tr")
+                    # 2. 🎯 [완결] tbody 단위 정밀 저격 파싱 로직 적용
+                    detail_tbodies = detail_soup.find_all("tbody")
+                    for t_idx, d_tbody in enumerate(detail_tbodies):
+                        tbody_rows = d_tbody.find_all("tr")
 
-                            for d_row in reversed(d_rows):
-                                d_cells = d_row.find_all(["th", "td"])
-                                if not d_cells:
-                                    continue
+                        # 행이 최소 2개 이상 존재해야 두 번째 행 검사 가능
+                        if len(tbody_rows) >= 2:
+                            second_row_cells = tbody_rows[1].find_all(["th", "td"])
+                            second_row_text = "".join(
+                                [re.sub(r'\s+', '', cell.get_text()) for cell in second_row_cells])
 
-                                cells_list = [re.sub(r'\s+', '', cell.get_text()) for cell in d_cells]
-                                row_split_text = "|".join(cells_list)
+                            # 💡 두 번째 행 헤더에 '유통가능물량' 키워드가 완벽히 포착되었는지 검증
+                            if "유통가능물량" in second_row_text:
+                                print(f"  👉 [{t_idx}번 tbody] 유통가능물량 진짜 표 저격 성공")
 
-                                # '합계' 또는 '총합계' 칸이 명확히 존재하는 행만 최종 타겟팅
-                                if "합계" in cells_list or any(item == "합계" or item == "총합계" for item in cells_list):
-                                    print(f"    - '합계' 결산 행 안전 분할 포착: '{row_split_text}'")
+                                # 해당 tbody 내의 행들을 역순으로 훑어 하단 합계 데이터 추출
+                                for d_row in reversed(tbody_rows):
+                                    d_cells = d_row.find_all(["th", "td"])
+                                    if not d_cells:
+                                        continue
 
-                                    valid_items = []
-                                    for item in cells_list:
-                                        if re.match(r'^[\d,]+$', item) or re.match(r'^[\d.]+\%$', item):
-                                            valid_items.append(item)
+                                    cells_list = [re.sub(r'\s+', '', cell.get_text()) for cell in d_cells]
+                                    row_split_text = "|".join(cells_list)
 
-                                    print(f"    - 구분 정제된 유효 스펙 데이터 배열: {valid_items}")
+                                    # '합계' 혹은 '총합계' 칸 확인
+                                    if "합계" in cells_list or any(item == "합계" or item == "총합계" for item in cells_list):
+                                        print(f"    - '합계' 결산 행 안전 분할 포착: '{row_split_text}'")
 
-                                    if len(valid_items) >= 2:
-                                        final_percent = valid_items[-1] # 맨 오른쪽 백분율
-                                        final_shares = valid_items[-2]  # 그 직전 주식수
+                                        valid_items = []
+                                        for item in cells_list:
+                                            if re.match(r'^[\d,]+$', item) or re.match(r'^[\d.]+\%$', item):
+                                                valid_items.append(item)
 
-                                        if final_percent != "100.00%":
-                                            floating_shares = f"{final_shares}주({final_percent})"
-                                            print(f"    - 🎯 테이블 오인 버그 완전 해결 성공: {floating_shares}")
-                                            break
-                            if floating_shares:
-                                break  # 진짜 표에서 정확히 뽑아냈으므로 다른 테이블 탐색 조기 종료
+                                        print(f"    - 구분 정제된 유효 스펙 데이터 배열: {valid_items}")
+
+                                        if len(valid_items) >= 2:
+                                            final_percent = valid_items[-1]
+                                            final_shares = valid_items[-2]
+
+                                            if final_percent != "100.00%":
+                                                floating_shares = f"{final_shares}주({final_percent})"
+                                                print(f"    - 🎯 완벽 수집 성공 결과: {floating_shares}")
+                                                break
+                                if floating_shares:
+                                    break  # 타겟 tbody 가공이 완전히 종료되었으므로 다른 tbody 탐색 skip
 
                     # 3. OpenAI 요약 파트
                     page_text = detail_soup.get_text()
@@ -241,17 +247,13 @@ def run_stock_crawler():
             except Exception as sub_e:
                 print(f"❌ {stock_name} 상세 데이터 가공 중 에러 발생: {str(sub_e)}")
 
-            # 🎯 [보정 규칙 이식] 소수점 제거 반올림 및 액수 자리수별 원마크(🔵/🔴) 분기 연산
+            # 금액 연산 파트
             if confirmed_price and floating_shares:
                 try:
                     num_price = int(re.sub(r'[^\d]', '', confirmed_price))
                     num_shares = int(re.sub(r'[^\d]', '', floating_shares.split('주')[0]))
-
-                    # 원 단위 금액 연산 후 1억으로 나누고 반올림하여 소수점이 없는 정수형 억 단위 도출
                     calc_amount_billion = round((num_price * num_shares) / 100000000)
-
                     if calc_amount_billion > 0:
-                        # 1,000억 단위 이상(4자리 이상)이면 빨간색 원, 그 미만(3자리 이하)이면 파란색 원 지정
                         color_circle = "🔴" if calc_amount_billion >= 1000 else "🔵"
                         floating_amount = f"약 {calc_amount_billion:,}억 원 {color_circle}"
                 except Exception as calc_err:
