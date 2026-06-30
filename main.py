@@ -190,7 +190,7 @@ def run_stock_crawler():
             "timestamp": firestore.SERVER_TIMESTAMP,
             "status": "SUCCESS",
             # 💡 [프로젝트명] + 작업명 구조로 명확하게 인지되도록 설정
-            "task_name": "[IPO캘린더] 38커뮤니케이션 수집",
+            "task_name": "[IPOinfoCrawler] 38커뮤니케이션 IPO일정 수집",
             "added_count": success_count,
             "skipped_count": skip_count,
             "message": f"AI 수집 자동화 정상 종료 - 신규: {success_count}건"
