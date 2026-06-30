@@ -44,12 +44,7 @@ def summarize_business_with_ai(stock_name, business_raw_text):
                     "role": "system",
                     "content": (
                         "너는 주식 분석 전문가야. 제공된 공모 기업의 사업 현황 본문을 읽고, "
-                        "이 회사가 '무엇을 기반으로 어떤 핵심 제품/서비스를 만들어 수익을 내는지' "
-                        "그 정체성만 명확하게 파악하여 60자 내외의 명사형 문장으로 정갈하게 요약해 줘.\n"
-                        "조건:\n"
-                        "1. '당사는', '동사는' 같은 주어는 생략하고 바로 핵심 내용으로 시작할 것.\n"
-                        "2. 마침표(.)로 깔끔하게 끝낼 것.\n"
-                        "3. 홍보성 미사여구나 불필요한 서론은 제외하고 알맹이 정보만 남길 것."
+                        "사업설명을 증권사 리포트에서 사용하는 사업 분야 한 줄로 요약해줘. "
                     )
                 },
                 {"role": "user", "content": f"기업명: {stock_name}\n\n[사업 현황 원문]\n{business_raw_text[:2500]}"}
@@ -59,7 +54,7 @@ def summarize_business_with_ai(stock_name, business_raw_text):
             temperature=0.4  # 일관성 있는 분석 출력을 위해 낮은 값 세팅
         )
         ai_result = response.choices[0].message.content.strip()
-        return f"[기업 요약] {ai_result}"
+        return f"-{ai_result}"
 
     except Exception as e:
         print(f"❌ GPT API 통신 실패: {str(e)}")
