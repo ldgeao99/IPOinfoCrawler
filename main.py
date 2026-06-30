@@ -33,7 +33,7 @@ def summarize_business_with_ai(stock_name, business_raw_text):
     핵심 비즈니스 모델만 10~20자 내외 명사형으로 정밀 요약해 옵니다.
     """
     if not business_raw_text or "사업현황" not in business_raw_text:
-        return f"{stock_name} 상장 일정 자동 등록"
+        return f"참조가능정보 없음"
 
     try:
         # 프롬프트 엔지니어링을 통해 노이즈를 걸러내고 핵심 결과값 규격 강제
