@@ -62,6 +62,9 @@ def summarize_business_with_ai(stock_name, business_raw_text):
             temperature=0.4
         )
         ai_result = response.choices[0].message.content.strip()
+
+        # [안전장치] 앞바닥에 붙는 불필요한 기호 및 노이즈 제거
+        ai_result = re.sub(r'^[\s\-\•\.\,\_]+', '', ai_result)
         return f"{ai_result}"
 
     except Exception as e:
@@ -146,11 +149,13 @@ def run_stock_crawler():
             if "index.htm" in detail_route:
                 detail_route = detail_route.replace("index.htm", "").replace("?", "")
 
-            detail_url = base_url + detail_route if detail_route.startswith("/") else f"{base_url}/html/fund/{detail_route}"
+            detail_url = base_url + detail_route if detail_route.startswith(
+                "/") else f"{base_url}/html/fund/{detail_route}"
             if "o=v" not in detail_url and "no=" in detail_url:
                 detail_url = detail_url.replace("?", "?o=v&")
 
-            detail_desc = ""
+            detail_desc = "신규상장 예정 종목"
+            confirmed_price = ""  # 💡 확정공모가 저장용 변수 초기화
 
             try:
                 detail_res = session.get(detail_url, headers=headers, verify=False)
@@ -158,8 +163,24 @@ def run_stock_crawler():
 
                 if detail_res.status_code == 200:
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
-                    page_text = detail_soup.get_text()
 
+                    # 💡 [신규 탐색] 상단 공모정보 테이블에서 '확정공모가' 추출
+                    detail_tables = detail_soup.find_all("table")
+                    for d_table in detail_tables:
+                        if "확정공모가" in d_table.get_text():
+                            d_rows = d_table.find_all("tr")
+                            for d_row in d_rows:
+                                d_cells = d_row.find_all(["th", "td"])
+                                for i, cell in enumerate(d_cells):
+                                    if "확정공모가" in cell.get_text():
+                                        raw_price = d_cells[i + 1].get_text().strip()
+                                        price_digits = re.sub(r'[^\d]', '', raw_price)
+                                        if price_digits:
+                                            confirmed_price = f"{int(price_digits):,}원"
+                                        break
+
+                    # 기존 AI 요약 메커니즘 엔진 작동
+                    page_text = detail_soup.get_text()
                     if "1." in page_text or "사업현황" in page_text:
                         cleaned_page_text = clean_text(page_text)
                         start_idx = cleaned_page_text.find("1.")
@@ -172,24 +193,27 @@ def run_stock_crawler():
             except Exception as sub_e:
                 print(f"⚠️ {stock_name} AI 데이터 분석 위임 실패: {str(sub_e)}")
 
-            # 🎯 [수정 교정] payload 딕셔너리 빌드 및 선언 위치를 try-except 밖으로 탈출시켰습니다.
+            # 💡 [핵심 가공] 확정공모가가 정상 추출되었다면 세부내용(detail) 상단에 줄바꿈 구조로 병합합니다.
+            if confirmed_price:
+                detail_desc = f"공모가: {confirmed_price}\n{detail_desc}"
+
+            # payload 딕셔너리 빌드 및 선언 위치 유지
             payload = {
                 "date": formatted_date,
                 "category": "신규상장",
                 "eventName": stock_name,
-                "detail": detail_desc,
-                "relatedStocks": "",  # 관련주 비워두기 적용 완료
-                "url": detail_url  # 상세 페이지 링크 주소 적용 완료
+                "detail": detail_desc,  # 💡 공모가와 AI 사업요약이 통합된 문자열 주입
+                "relatedStocks": "",
+                "url": detail_url
             }
 
             events_ref.add(payload)
             success_count += 1
-            print(f"🤖 AI 요약 완료 및 등록 성공: {formatted_date} | {stock_name}")
+            print(f"🤖 AI 요약 완료 및 등록 성공: {formatted_date} | {stock_name} (공모가 래핑 완료)")
 
         log_payload = {
             "timestamp": firestore.SERVER_TIMESTAMP,
             "status": "SUCCESS",
-            # 💡 [프로젝트명] + 작업명 구조로 명확하게 인지되도록 설정
             "task_name": "[IPOinfoCrawler] 38커뮤니케이션 IPO일정 수집",
             "added_count": success_count,
             "skipped_count": skip_count,
