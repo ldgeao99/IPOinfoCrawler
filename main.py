@@ -169,7 +169,7 @@ def run_stock_crawler():
                 if detail_res.status_code == 200:
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
 
-                    # 1. 확정공모가 추적 파트 (기존 유지)
+                    # 1. 확정공모가 추적 파트
                     detail_tables = detail_soup.find_all("table")
                     for d_table in detail_tables:
                         if "확정공모가" in d_table.get_text():
@@ -186,22 +186,22 @@ def run_stock_crawler():
                                                     confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                    # 2. 🎯 [완결] tbody 단위 정밀 저격 파싱 로직 적용
+                    # 2. 🎯 tbody 단위 정밀 저격 파싱 로직 및 매칭내용 디버깅 강화
                     detail_tbodies = detail_soup.find_all("tbody")
                     for t_idx, d_tbody in enumerate(detail_tbodies):
                         tbody_rows = d_tbody.find_all("tr")
 
-                        # 행이 최소 2개 이상 존재해야 두 번째 행 검사 가능
                         if len(tbody_rows) >= 2:
                             second_row_cells = tbody_rows[1].find_all(["th", "td"])
                             second_row_text = "".join(
                                 [re.sub(r'\s+', '', cell.get_text()) for cell in second_row_cells])
 
-                            # 💡 두 번째 행 헤더에 '유통가능물량' 키워드가 완벽히 포착되었는지 검증
                             if "유통가능물량" in second_row_text:
                                 print(f"  👉 [{t_idx}번 tbody] 유통가능물량 진짜 표 저격 성공")
+                                # 💡 [추가 로그] 적중된 tbody의 원본 컨텐츠 상위 150자를 출력하여 오파싱 검증 기반 마련
+                                tbody_summary = re.sub(r'\s+', ' ', d_tbody.get_text()).strip()
+                                print(f"    - [tbody 매칭본문 스냅샷]: '{tbody_summary[:150]}...'")
 
-                                # 해당 tbody 내의 행들을 역순으로 훑어 하단 합계 데이터 추출
                                 for d_row in reversed(tbody_rows):
                                     d_cells = d_row.find_all(["th", "td"])
                                     if not d_cells:
@@ -210,7 +210,6 @@ def run_stock_crawler():
                                     cells_list = [re.sub(r'\s+', '', cell.get_text()) for cell in d_cells]
                                     row_split_text = "|".join(cells_list)
 
-                                    # '합계' 혹은 '총합계' 칸 확인
                                     if "합계" in cells_list or any(item == "합계" or item == "총합계" for item in cells_list):
                                         print(f"    - '합계' 결산 행 안전 분할 포착: '{row_split_text}'")
 
@@ -230,7 +229,7 @@ def run_stock_crawler():
                                                 print(f"    - 🎯 완벽 수집 성공 결과: {floating_shares}")
                                                 break
                                 if floating_shares:
-                                    break  # 타겟 tbody 가공이 완전히 종료되었으므로 다른 tbody 탐색 skip
+                                    break
 
                     # 3. OpenAI 요약 파트
                     page_text = detail_soup.get_text()
