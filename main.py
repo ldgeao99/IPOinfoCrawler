@@ -10,7 +10,7 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from openai import OpenAI
 
-# 파인 레벨 정수 변환 제한 확장
+# 파인 레벨 정수 변환 제한 확장 (안전장치)
 sys.set_int_max_str_digits(10000)
 
 # 1. 환경 설정 및 클라이언트 초기화
@@ -156,6 +156,7 @@ def run_stock_crawler():
 
             detail_desc = "신규상장 예정 종목"
             confirmed_price = ""
+            floating_shares = ""  # 💡 유통가능물량 텍스트 저장용 변수 초기화
 
             try:
                 detail_res = session.get(detail_url, headers=headers, verify=False)
@@ -163,17 +164,18 @@ def run_stock_crawler():
 
                 if detail_res.status_code == 200:
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
-
-                    # 1. 상단 공모정보 테이블에서 '확정공모가' 추출
                     detail_tables = detail_soup.find_all("table")
+
                     for d_table in detail_tables:
-                        if "확정공모가" in d_table.get_text():
+                        d_table_text = d_table.get_text()
+
+                        # 1. [공모정보] 테이블 탐색 (확정공모가 추출)
+                        if "확정공모가" in d_table_text:
                             d_rows = d_table.find_all("tr")
                             for d_row in d_rows:
                                 d_cells = d_row.find_all(["th", "td"])
                                 for i, cell in enumerate(d_cells):
                                     if "확정공모가" in cell.get_text():
-                                        # 💡 [안전장치] 현재 칸이 마지막 칸이 아닐 때만(인덱스 범위 내부일 때만) 가져오도록 예외 조치
                                         if i + 1 < len(d_cells):
                                             raw_price = d_cells[i + 1].get_text().strip()
                                             if len(raw_price) < 30:
@@ -182,7 +184,26 @@ def run_stock_crawler():
                                                     confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                    # 2. OpenAI 핵심 비즈니스 요약 엔진 정상 가동
+                        # 2. 💡 [유통가능물량] 테이블 탐색 기동
+                        if "유통가능물량(A-B)" in d_table_text:
+                            d_rows = d_table.find_all("tr")
+                            if d_rows:
+                                # 해당 테이블의 최하단 행(마지막 tr) 확보
+                                last_row = d_rows[-1]
+                                last_cells = last_row.find_all(["th", "td"])
+
+                                # 마지막 행에서 주식수 형식(예: 3,541,095)과 퍼센트 형식(예: 29.39%) 텍스트 정밀 트래킹
+                                for cell in last_cells:
+                                    cell_txt = clean_text(cell.get_text())
+                                    # 패턴 일치 검사 (숫자+쉼표 묶음 및 괄호 안의 소수점% 동시 매칭)
+                                    match = re.search(r'([\d,]+)\s*주?\s*\(([\d.]+)\s*%\)', cell_txt)
+                                    if match:
+                                        shares_count = match.group(1).strip()
+                                        shares_percent = match.group(2).strip()
+                                        floating_shares = f"{shares_count}주({shares_percent}%)"
+                                        break
+
+                    # 3. OpenAI 핵심 비즈니스 요약 엔진 작동
                     page_text = detail_soup.get_text()
                     if "1." in page_text or "사업현황" in page_text:
                         cleaned_page_text = clean_text(page_text)
@@ -196,9 +217,11 @@ def run_stock_crawler():
             except Exception as sub_e:
                 print(f"⚠️ {stock_name} 상세 데이터 가공 실패: {str(sub_e)}")
 
-            # 🎯 [요청 반영] AI 요약 설명이 먼저 나오고, 공모가 안내가 '하단'에 위치하도록 순서 교정
+            # 🎯 [포맷 통합 연동] AI요약문 하단에 공모가와 유통가능물량이 정갈하게 줄바꿈 결합되도록 구성
             if confirmed_price:
                 detail_desc = f"{detail_desc}\n공모가: {confirmed_price}"
+            if floating_shares:
+                detail_desc = f"{detail_desc}\n유통가능물량: {floating_shares}"
 
             payload = {
                 "date": formatted_date,
@@ -211,7 +234,7 @@ def run_stock_crawler():
 
             events_ref.add(payload)
             success_count += 1
-            print(f"🤖 AI 요약 완료 및 등록 성공: {formatted_date} | {stock_name}")
+            print(f"🤖 데이터 최종 적재 완료: {formatted_date} | {stock_name}")
 
         log_payload = {
             "timestamp": firestore.SERVER_TIMESTAMP,
