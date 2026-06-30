@@ -172,7 +172,6 @@ def run_stock_crawler():
 
                         if start_idx != -1:
                             target_chunk = cleaned_page_text[max(0, start_idx - 20):start_idx + 3500]
-                            # 🎯 AI 요약 엔진 가동 처리
                             detail_desc = summarize_business_with_ai(stock_name, target_chunk)
             except Exception as sub_e:
                 print(f"⚠️ {stock_name} AI 데이터 분석 위임 실패: {str(sub_e)}")
@@ -183,8 +182,8 @@ def run_stock_crawler():
                     "category": "신규상장",
                     "eventName": stock_name,
                     "detail": detail_desc,
-                    "relatedStocks": "",
-                    "url": detail_url  # 💡 [신규 추가] 클릭 시 이동할 38커뮤니케이션 상세 페이지 링크를 저장합니다.
+                    "relatedStocks": "",  # 관련주 비워두기 적용 완료
+                    "url": detail_url  # 상세 페이지 링크 주소 적용 완료
                 }
 
             events_ref.add(payload)
