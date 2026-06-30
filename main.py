@@ -189,45 +189,39 @@ def run_stock_crawler():
                                                     confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                        # 2. 🎯 유통가능물량 파싱 핵심 종결 로직 (합계 행 강제 앵커 보정)
+                        # 2. 🎯 유통가능물량 파싱 최종 완결 버전 (칸별 구분자 맵 설계)
                         if "유통가능물량" in d_table_text:
                             print(f"  👉 [{idx}번 테이블] 유통가능물량 전용 표 적중 성공")
                             d_rows = d_table.find_all("tr")
 
                             for d_row in reversed(d_rows):
-                                row_combined_text = re.sub(r'\s+', '', d_row.get_text())
+                                d_cells = d_row.find_all(["th", "td"])
+                                if not d_cells:
+                                    continue
 
-                                # 💡 [보정 가드] 다른 주주 행을 원천 배제하고, 오직 최종 합계 수치가 적힌 행만 타겟팅합니다.
-                                if "합계" in row_combined_text:
-                                    print(f"    - '합계' 결산 행 포착: '{row_combined_text}'")
+                                # 💡 각 칸의 텍스트에서 공백을 지우고 파이프라인('|') 구분자로 안전하게 연결합니다.
+                                cells_list = [re.sub(r'\s+', '', cell.get_text()) for cell in d_cells]
+                                row_split_text = "|".join(cells_list)
 
-                                    # 천 단위 콤마가 포함된 주식수 패턴세트와 소수점 퍼센트 패턴세트 독립 추출
-                                    shares_matches = re.findall(r'\b\d{1,3}(?:,\d{3})+\b|[\d,]{4,}', row_combined_text)
-                                    percent_matches = re.findall(r'[\d.]+\%', row_combined_text)
+                                if "합계" in row_split_text:
+                                    print(f"    - '합계' 결산 행 안전 분할 포착: '{row_split_text}'")
 
-                                    if shares_matches and percent_matches:
-                                        raw_shares = shares_matches[-1]
-                                        final_percent = percent_matches[-1]
+                                    # 구분자 기점으로 순수 숫자 구조와 % 구조만 배열로 정제 추출
+                                    valid_items = []
+                                    for item in cells_list:
+                                        if re.match(r'^[\d,]+$', item) or re.match(r'^[\d.]+\%$', item):
+                                            valid_items.append(item)
 
-                                        # 밀착 현상으로 인한 경계선 분할 가공
-                                        if final_percent.startswith('.'):
-                                            actual_percent_prefix = re.search(r'(\d+)' + re.escape(final_percent),
-                                                                              row_combined_text)
-                                            if actual_percent_prefix:
-                                                final_percent = f"{actual_percent_prefix.group(1)}{final_percent}"
+                                    print(f"    - 구분 정제된 유효 스펙 데이터 배열: {valid_items}")
 
-                                        final_shares = re.sub(r'\d+$', '', raw_shares) if raw_shares.endswith(
-                                            final_percent.split('.')[0]) else raw_shares
+                                    # 맨 마지막에 위치한 두 개가 언제나 유통지분율과 유통주식수가 됩니다.
+                                    if len(valid_items) >= 2:
+                                        final_percent = valid_items[-1]  # 맨 오른쪽 백분율
+                                        final_shares = valid_items[-2]  # 그 직전 주식수
 
-                                        match_clean = re.search(r'([\d,]+?)(?=\d{2}\.\d+%)|([\d,]+)', raw_shares)
-                                        if match_clean:
-                                            final_shares = match_clean.group(1) if match_clean.group(
-                                                1) else match_clean.group(2)
-
-                                        # 예외 필터 검증 후 최종 빌드 확정
                                         if final_percent != "100.00%":
-                                            floating_shares = f"{final_shares.strip(',')}주({final_percent})"
-                                            print(f"    - 🎯 정밀 매핑 완료: {floating_shares}")
+                                            floating_shares = f"{final_shares}주({final_percent})"
+                                            print(f"    - 🎯 경계선 붕괴 버그 완전 해결 성공: {floating_shares}")
                                             break
                             break
 
