@@ -5,9 +5,13 @@ import os
 import urllib3
 import ssl
 import re
+import sys  # 💡 정수 변환 자릿수 제한 확장을 위해 추가
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
-from openai import OpenAI  # 💡 OpenAI 최신 규격 라이브러리 로드
+from openai import OpenAI
+
+# 💡 [안전장치 1] 파이썬 엔진의 정수형 문자열 변환 한계선을 1만 자리로 확장하여 런타임 크래시 방지
+sys.set_int_max_str_digits(10000)
 
 # 1. 환경 설정 및 클라이언트 초기화
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "stockcalender-13042-firebase-adminsdk-fbsvc-18b1748d9a.json"
@@ -15,7 +19,6 @@ db = firestore.Client()
 events_ref = db.collection("events")
 logs_ref = db.collection("crawler_logs")
 
-# GitHub Actions 환경변수 또는 로컬 환경변수에서 API Key 자동 로드
 ai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 
@@ -36,9 +39,8 @@ def summarize_business_with_ai(stock_name, business_raw_text):
         return f"참조 가능한 정보 없음"
 
     try:
-        # 프롬프트 엔지니어링을 통해 노이즈를 걸러내고 핵심 결과값 규격 강제
         response = ai_client.chat.completions.create(
-            model="gpt-4o-mini",  # 가성비 극대화 모델
+            model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
@@ -62,8 +64,6 @@ def summarize_business_with_ai(stock_name, business_raw_text):
             temperature=0.4
         )
         ai_result = response.choices[0].message.content.strip()
-
-        # [안전장치] 앞바닥에 붙는 불필요한 기호 및 노이즈 제거
         ai_result = re.sub(r'^[\s\-\•\.\,\_]+', '', ai_result)
         return f"{ai_result}"
 
@@ -155,7 +155,7 @@ def run_stock_crawler():
                 detail_url = detail_url.replace("?", "?o=v&")
 
             detail_desc = "신규상장 예정 종목"
-            confirmed_price = ""  # 💡 확정공모가 저장용 변수 초기화
+            confirmed_price = ""
 
             try:
                 detail_res = session.get(detail_url, headers=headers, verify=False)
@@ -164,7 +164,7 @@ def run_stock_crawler():
                 if detail_res.status_code == 200:
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
 
-                    # 💡 [신규 탐색] 상단 공모정보 테이블에서 '확정공모가' 추출
+                    # 상단 공모정보 테이블에서 '확정공모가' 추출
                     detail_tables = detail_soup.find_all("table")
                     for d_table in detail_tables:
                         if "확정공모가" in d_table.get_text():
@@ -174,9 +174,12 @@ def run_stock_crawler():
                                 for i, cell in enumerate(d_cells):
                                     if "확정공모가" in cell.get_text():
                                         raw_price = d_cells[i + 1].get_text().strip()
-                                        price_digits = re.sub(r'[^\d]', '', raw_price)
-                                        if price_digits:
-                                            confirmed_price = f"{int(price_digits):,}원"
+
+                                        # 💡 [안전장치 2] 가격이 적힌 칸의 길이가 정상 범위(30자 이하)일 때만 숫자를 파싱하도록 노이즈 텍스트 필터링
+                                        if len(raw_price) < 30:
+                                            price_digits = re.sub(r'[^\d]', '', raw_price)
+                                            if price_digits:
+                                                confirmed_price = f"{int(price_digits):,}원"
                                         break
 
                     # 기존 AI 요약 메커니즘 엔진 작동
@@ -193,23 +196,21 @@ def run_stock_crawler():
             except Exception as sub_e:
                 print(f"⚠️ {stock_name} AI 데이터 분석 위임 실패: {str(sub_e)}")
 
-            # 💡 [핵심 가공] 확정공모가가 정상 추출되었다면 세부내용(detail) 상단에 줄바꿈 구조로 병합합니다.
             if confirmed_price:
                 detail_desc = f"공모가: {confirmed_price}\n{detail_desc}"
 
-            # payload 딕셔너리 빌드 및 선언 위치 유지
             payload = {
                 "date": formatted_date,
                 "category": "신규상장",
                 "eventName": stock_name,
-                "detail": detail_desc,  # 💡 공모가와 AI 사업요약이 통합된 문자열 주입
+                "detail": detail_desc,
                 "relatedStocks": "",
                 "url": detail_url
             }
 
             events_ref.add(payload)
             success_count += 1
-            print(f"🤖 AI 요약 완료 및 등록 성공: {formatted_date} | {stock_name} (공모가 래핑 완료)")
+            print(f"🤖 AI 요약 완료 및 등록 성공: {formatted_date} | {stock_name}")
 
         log_payload = {
             "timestamp": firestore.SERVER_TIMESTAMP,
