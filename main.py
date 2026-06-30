@@ -160,6 +160,7 @@ def run_stock_crawler():
             detail_desc = "신규상장 예정 종목"
             confirmed_price = ""
             floating_shares = ""
+            floating_amount = ""  # 💡 유통가능액수 문자열 변수 초기화
 
             try:
                 detail_res = session.get(detail_url, headers=headers, verify=False)
@@ -189,7 +190,7 @@ def run_stock_crawler():
                                                     confirmed_price = f"{int(price_digits):,}원"
                                         break
 
-                        # 2. 🎯 유통가능물량 파싱 최종 완결 버전 (칸별 구분자 맵 설계)
+                        # 2. 유통가능물량 파싱 핵심 종결 로직
                         if "유통가능물량" in d_table_text:
                             print(f"  👉 [{idx}번 테이블] 유통가능물량 전용 표 적중 성공")
                             d_rows = d_table.find_all("tr")
@@ -199,29 +200,24 @@ def run_stock_crawler():
                                 if not d_cells:
                                     continue
 
-                                # 💡 각 칸의 텍스트에서 공백을 지우고 파이프라인('|') 구분자로 안전하게 연결합니다.
                                 cells_list = [re.sub(r'\s+', '', cell.get_text()) for cell in d_cells]
                                 row_split_text = "|".join(cells_list)
 
                                 if "합계" in row_split_text:
                                     print(f"    - '합계' 결산 행 안전 분할 포착: '{row_split_text}'")
 
-                                    # 구분자 기점으로 순수 숫자 구조와 % 구조만 배열로 정제 추출
                                     valid_items = []
                                     for item in cells_list:
                                         if re.match(r'^[\d,]+$', item) or re.match(r'^[\d.]+\%$', item):
                                             valid_items.append(item)
 
-                                    print(f"    - 구분 정제된 유효 스펙 데이터 배열: {valid_items}")
-
-                                    # 맨 마지막에 위치한 두 개가 언제나 유통지분율과 유통주식수가 됩니다.
                                     if len(valid_items) >= 2:
-                                        final_percent = valid_items[-1]  # 맨 오른쪽 백분율
-                                        final_shares = valid_items[-2]  # 그 직전 주식수
+                                        final_percent = valid_items[-1]
+                                        final_shares = valid_items[-2]
 
                                         if final_percent != "100.00%":
                                             floating_shares = f"{final_shares}주({final_percent})"
-                                            print(f"    - 🎯 경계선 붕괴 버그 완전 해결 성공: {floating_shares}")
+                                            print(f"    - 🎯 경계선 버그 완전 해결 성공: {floating_shares}")
                                             break
                             break
 
@@ -240,10 +236,26 @@ def run_stock_crawler():
             except Exception as sub_e:
                 print(f"❌ {stock_name} 상세 데이터 가공 중 에러 발생: {str(sub_e)}")
 
+            # 🎯 [신규 기능 연동] 공모가와 물량이 둘 다 수집되었을 때 곱셈 연산 후 억 단위로 변환
+            if confirmed_price and floating_shares:
+                try:
+                    num_price = int(re.sub(r'[^\d]', '', confirmed_price))  # 12500
+                    num_shares = int(re.sub(r'[^\d]', '', floating_shares.split('주')[0]))  # 3541095
+
+                    # 수식 연산 후 원 단위를 억 단위로 가공 (소수점 첫째자리까지 반올림 표현)
+                    calc_amount_billion = round((num_price * num_shares) / 100000000, 1)
+                    if calc_amount_billion > 0:
+                        floating_amount = f"약 {calc_amount_billion:,}억 원"
+                except Exception as calc_err:
+                    print(f"⚠️ {stock_name} 유통가능액수 수식 연산 오류: {str(calc_err)}")
+
+            # 순서 구조 확정 연동 (요청에 따라 순차적 하단 정렬 처리)
             if confirmed_price:
                 detail_desc = f"{detail_desc}\n공모가: {confirmed_price}"
             if floating_shares:
                 detail_desc = f"{detail_desc}\n유통가능물량: {floating_shares}"
+            if floating_amount:
+                detail_desc = f"{detail_desc}\n유통가능액수: {floating_amount}"
 
             payload = {
                 "date": formatted_date,
