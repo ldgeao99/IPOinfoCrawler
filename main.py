@@ -154,6 +154,12 @@ def run_stock_crawler():
             if "o=v" not in detail_url and "no=" in detail_url:
                 detail_url = detail_url.replace("?", "?o=v&")
 
+            # -------------------------------------------------------------
+            # 여기서부터 개별 종목 상세 디버깅 파트 시작
+            # -------------------------------------------------------------
+            print(f"\n🔍 [디버깅 대상 종목 시작] -------------------------------")
+            print(f"🏢 종목명: {stock_name} | 🔗 URL: {detail_url}")
+
             detail_desc = "신규상장 예정 종목"
             confirmed_price = ""
             floating_shares = ""
@@ -166,11 +172,14 @@ def run_stock_crawler():
                     detail_soup = BeautifulSoup(detail_res.text, "html.parser")
                     detail_tables = detail_soup.find_all("table")
 
-                    for d_table in detail_tables:
+                    print(f"📊 상세페이지 내 발견된 전체 테이블 개수: {len(detail_tables)}개")
+
+                    for idx, d_table in enumerate(detail_tables):
                         d_table_text = d_table.get_text()
 
-                        # 1. [공모정보] 테이블 탐색 (확정공모가 추출)
+                        # 1. 확정공모가 추적 디버깅
                         if "확정공모가" in d_table_text:
+                            print(f"  👉 [{idx}번 테이블] '확정공모가' 키워드 포착")
                             d_rows = d_table.find_all("tr")
                             for d_row in d_rows:
                                 d_cells = d_row.find_all(["th", "td"])
@@ -178,29 +187,37 @@ def run_stock_crawler():
                                     if "확정공모가" in cell.get_text():
                                         if i + 1 < len(d_cells):
                                             raw_price = d_cells[i + 1].get_text().strip()
+                                            print(f"    - 원본 문자열 발견: '{raw_price}'")
                                             if len(raw_price) < 30:
                                                 price_digits = re.sub(r'[^\d]', '', raw_price)
                                                 if price_digits:
                                                     confirmed_price = f"{int(price_digits):,}원"
+                                                    print(f"    - 🎯 정제 성공: {confirmed_price}")
                                         break
 
-                        # 2. 🎯 [유통가능물량] 최강 통용 정규식 필터링 적용
+                        # 2. 유통가능물량 추적 디버깅
                         if "유통가능물량(A-B)" in d_table_text:
+                            print(f"  👉 [{idx}번 테이블] '유통가능물량(A-B)' 키워드 포착")
                             d_rows = d_table.find_all("tr")
-                            for d_row in d_rows:
-                                # 행 전체의 텍스트를 공백 없이 단 한 줄의 압축 문자열로 만듭니다.
+                            for r_idx, d_row in enumerate(d_rows):
                                 row_combined_text = re.sub(r'\s+', '', d_row.get_text())
 
                                 if "합계" in row_combined_text:
-                                    # 💡 문자열 전체에서 "맨 마지막"에 위치한 [숫자,숫자,숫자]와 [숫자.숫자%] 형태를 통째로 정밀 스캔합니다.
+                                    print(f"    - [{r_idx}번째 행] '합계' 키워드 진입 완료")
+                                    print(f"    - 압축된 행 텍스트 전체: '{row_combined_text}'")
+
                                     matches = re.findall(r'([\d,]+)([\d.]+\%)', row_combined_text)
+                                    print(f"    - 정규식 정밀 스캔 매칭 목록: {matches}")
+
                                     if matches:
-                                        # 맨 마지막 세트 선택
                                         final_shares, final_percent = matches[-1]
                                         floating_shares = f"{final_shares}주({final_percent})"
+                                        print(f"    - 🎯 최종 매핑 결과 선택: {floating_shares}")
+                                    else:
+                                        print(f"    - ⚠️ 경고: '합계' 행은 찾았으나 정규식(숫자+%) 조건에 걸러진 데이터가 없음")
                                     break
 
-                    # 3. OpenAI 핵심 비즈니스 요약 엔진 작동
+                    # 3. OpenAI 요약 파트
                     page_text = detail_soup.get_text()
                     if "1." in page_text or "사업현황" in page_text:
                         cleaned_page_text = clean_text(page_text)
@@ -211,8 +228,9 @@ def run_stock_crawler():
                         if start_idx != -1:
                             target_chunk = cleaned_page_text[max(0, start_idx - 20):start_idx + 3500]
                             detail_desc = summarize_business_with_ai(stock_name, target_chunk)
+                            print(f"🤖 OpenAI 한줄 요약 변환: {detail_desc}")
             except Exception as sub_e:
-                print(f"⚠️ {stock_name} 상세 데이터 가공 실패: {str(sub_e)}")
+                print(f"❌ {stock_name} 상세 데이터 가공 중 에러 발생: {str(sub_e)}")
 
             if confirmed_price:
                 detail_desc = f"{detail_desc}\n공모가: {confirmed_price}"
@@ -230,7 +248,8 @@ def run_stock_crawler():
 
             events_ref.add(payload)
             success_count += 1
-            print(f"🤖 데이터 최종 적재 완료: {formatted_date} | {stock_name}")
+            print(f"✅ 데이터 최종 적재 성공 완료")
+            print(f"🔍 [디버깅 대상 종목 종료] -------------------------------\n")
 
         log_payload = {
             "timestamp": firestore.SERVER_TIMESTAMP,
